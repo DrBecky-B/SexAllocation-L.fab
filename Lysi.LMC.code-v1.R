@@ -83,18 +83,21 @@ icc(BCICC, model="twoway", type="agreement")
 
 #data wrangling - need to combine sex ratio data and wing length and amalgamate any duplicates
 
-Raw.SR <- read.delim("~Raw.SR.txt")
+Raw.SR <- read.delim("Raw.SR.txt")
 
 Raw.SR$Treat <- as.factor(Raw.SR$Treatment....females.)
 Raw.SR$Dayspp <- as.factor(Raw.SR$Days.pp.1)
+Raw.SR$Tot <- Raw.SR$Males + Raw.SR$Females
 
-F.WL <- read.delim("~F.WL.txt")
-M.WL <- read.delim("~M.WL.txt")
+F.WL <- read.delim("F.WL.txt")
+M.WL <- read.delim("M.WL.txt")
 
+detach("package:plyr", unload = TRUE) #need to do this or the next bit doesn't work
+library(dplyr)
 
 SR.dat <- Raw.SR  %>%
   group_by(Tube.tub) %>%
-  summarise(m = sum(Males), f = sum(Females))
+  summarise(m = sum(Males), f = sum(Females), tot = sum(Tot))
 
 Treat.dat <- Raw.SR %>%
   group_by(Tube.tub) %>%
@@ -104,10 +107,23 @@ Time.dat <- Raw.SR %>%
   group_by(Tube.tub) %>%
   summarise(Time = names(which.max(table(Days.pp.1))))
 
+Total.tubes <- Raw.SR %>%
+  group_by(Tube.tub) %>%
+  summarise(Tube_ID = names(which.max(table(Tube_number))))
+
+Total.wasps <- Raw.SR %>%
+  group_by(Tube_number) %>%
+  summarise(Total = sum(Tot))
+
+colnames(Total.wasps)<- c('Tube_ID', 'Total')
+
 All.SR <- SR.dat %>%
   full_join(Treat.dat, by = "Tube.tub") %>%
   full_join(Time.dat, by = "Tube.tub") %>%
+  full_join(Total.tubes, by = "Tube.tub") %>%
   mutate_if(is.numeric, function(x) replace_na(x, -1))
+
+#need to summarise totals and overall sex ratios for each replicate 
 
 Fem.WL <- F.WL %>%
   group_by(Tube.tub) %>%
@@ -117,7 +133,6 @@ Male.WL <- M.WL %>%
   group_by(Tube.tub) %>%
   summarise(Winglength = mean(Wing.length))
 
-
 combine <- Male.WL %>%
   full_join(Fem.WL, by = "Tube.tub") %>%
   mutate_if(is.numeric, function(x) replace_na(x, -1))
@@ -126,19 +141,511 @@ SR.WL <- All.SR %>%
   full_join(combine, by = "Tube.tub") %>%
   mutate_if(is.numeric, function(x) replace_na(x, -1))
 
-  
+SR.WL <- SR.WL[complete.cases(SR.WL), ]
+
+SR.WL$M.Winglength <- na_if(SR.WL$Winglength.x, -1)
+SR.WL$F.Winglength <- na_if(SR.WL$Winglength.y, -1)
+
+SR.WL <- subset(SR.WL, m>=0 & f>=0)
+
+Males <- SR.WL[, c('Tube.tub', 'm', 'f', 'Treatment', 'Time', 'M.Winglength')]
+colnames(Males)<- c('Tube.tub', 'm', 'f', 'Treatment', 'Time', 'Winglength')
+
+Females <- SR.WL[, c('Tube.tub', 'm', 'f', 'Treatment', 'Time', 'F.Winglength')]
+colnames(Females)<- c('Tube.tub', 'm', 'f', 'Treatment', 'Time', 'Winglength')
+
+
+Males$sex <- 1
+Females$sex <- 0
+
+library(data.table)
+
+M.F.WL <- bind_rows(Males,Females)
 
 #Questions
 library(lme4)
+library(glmmTMB)
+library(DHARMa)
+library(car)
+library(binom)
+library(ggplot2)
 
-# (1) Is there a size difference between males and females?
+###### Sex ratio
+
+# (1) Is sex ratio consistent across treatment and time?
+
+#remove tube 13 (only 1 male wasp emerged - mix up with 18 so can't use)
+
+SR.WL <- SR.WL[-c(445), ]
+
+SR.WL$Timecont <- as.numeric(SR.WL$Time)
+SexRatioMod <- glmer(cbind(m,f) ~ Treatment*Timecont + (1|Tube_ID), family =  binomial(), data=SR.WL)
+SimulationOutputsr <- simulateResiduals(SexRatioMod, plot = T)
+
+summary(SexRatioMod)
+car::Anova(SexRatioMod)
+
+#Only effect is time - sex ratio becomes female biased over time
+
+#plot means
+SR.WL$SR <- SR.WL$m/SR.WL$tot
+
+level_order <- c('1', '5', '10') 
+cols <- c("1" = "red", "5" = "yellow", "10" = "blue")
+Time.Treat.SR <- ggplot(SR.WL, aes(Timecont, SR, colour=factor(Treatment, level = level_order))) +
+  geom_point() + geom_smooth(method = "lm") +
+  xlab("Emergence time (days") + ylab("Emergence sex ratio (proportion males)") + labs(colour = "Treatment") + scale_colour_manual(values = cols)
+Time.Treat.SR <- Time.Treat.SR + theme_classic() + theme(axis.title=element_text(face="bold.italic", 
+                                                                               size="12", color="black"), legend.position="top")
+
+# repeat using cumulative sums of males and females
+
+SR.WL$csm <- ave(SR.WL$m, SR.WL$Tube_ID, FUN=cumsum)
+SR.WL$csf <- ave(SR.WL$f, SR.WL$Tube_ID, FUN=cumsum)
+SR.WL$cstot <- ave(SR.WL$tot, SR.WL$Tube_ID, FUN=cumsum)
+
+
+CumSexRatioMod <- glmer(cbind(csm,csf) ~ Treatment + Timecont + (1|Tube_ID), family =  binomial(), data=SR.WL)
+SimulationOutputsr <- simulateResiduals(CumSexRatioMod, plot = T)
+
+summary(CumSexRatioMod)
+car::Anova(CumSexRatioMod)
+
+#Only effect still time
+
+#plot means
+SR.WL$cumSR <- SR.WL$csm/SR.WL$cstot
+
+level_order <- c('1', '5', '10') 
+cols <- c("1" = "red", "5" = "yellow", "10" = "blue")
+Time.Treat.cum.SR <- ggplot(SR.WL, aes(Timecont, cumSR, colour=factor(Treatment, level = level_order))) +
+  geom_point() + geom_smooth(method = "lm") +
+  xlab("Emergence time (days") + ylab("Cumulative Sex ratio (proportion males)") + labs(colour = "Treatment") + scale_colour_manual(values = cols)
+Time.Treat.cum.SR <- Time.Treat.cum.SR + theme_classic() + theme(axis.title=element_text(face="bold.italic", 
+                                                                size="12", color="black"), legend.position="top")
+
+# same - just more female biased over time and no differences between groups
+
+# (2) Is the overall sex ratio related to total number of wasps that emerged (in each rep)?
+
+Sum.SR.dat <- SR.WL  %>%
+  group_by(Tube_ID) %>%
+  summarise(m = sum(m), f = sum(f), tot = sum(tot))
+
+Sum.Treat.dat <- SR.WL %>%
+  group_by(Tube_ID) %>%
+  summarise(Treatment = names(which.max(table(Treatment))))
+
+Sum.SR <- Sum.SR.dat %>%
+  full_join(Sum.Treat.dat, by = "Tube_ID") 
+
+SumSexRatioMod <- glm(cbind(m,f) ~ Treatment*tot, family =  binomial(), data=Sum.SR)
+SimulationOutputsr <- simulateResiduals(SumSexRatioMod, plot = T)
+
+summary(SumSexRatioMod)
+car::Anova(SumSexRatioMod)
+
+#no effect of offspring number or treatment (or interaction) on overall sex ratio
+
+males<- Sum.SR %>%
+  group_by(Treatment) %>%
+  summarise( 
+    sum=sum(m))
+tot.wasps <- Sum.SR %>%
+  group_by(Treatment) %>%
+  summarise( 
+    sum=sum(tot))
+
+level_order <- c('1', '5', '10') 
+cols <- c("1" = "red", "5" = "yellow", "10" = "blue")
+Tot.Treat.SR <- ggplot(SR.WL, aes(tot, SR, colour=factor(Treatment, level = level_order))) +
+  geom_point() + geom_smooth(method = "lm") +
+  xlab("Total wasps emerging") + ylab("Sex ratio") + labs(colour = "Treatment") + scale_colour_manual(values = cols)
+Tot.Treat.SR <- Tot.Treat.SR + theme_classic() + theme(axis.title=element_text(face="bold.italic", 
+                                                                             size="12", color="black"), legend.position="top")
+
+# (3) is there an effect of treatment on the number of wasps that emerge?
+
+TotMod <- glm(tot ~ Treatment, data=Sum.SR)
+SimulationOutputsr <- simulateResiduals(TotMod, plot = T)
+summary(TotMod)
+car::Anova(TotMod)
+
+#sig diff between 1 and 5 and 1 and 10
+#test whether 5 and 10 differ
+
+
+Sum.SR$Treat.recode <- recode(Sum.SR$Treatment, "1" = "10", "10" = "1")
+Sum.SR$Treat.recode <- as.character(Sum.SR$Treat.recode)
+ReTotMod <- glm(tot ~ Treat.recode, data=Sum.SR)
+SimulationOutputsr <- simulateResiduals(ReTotMod, plot = T)
+summary(ReTotMod)
+car::Anova(ReTotMod)
+
+#no difference between 10 and 5 (p = 0.7)
+
+
+Totalemerge <- Sum.SR %>%
+  group_by(Treatment) %>%
+  summarise( 
+    n=n(),
+    mean=mean(tot),
+    sd=sd(tot),
+    max=max(tot),
+    min=min(tot),
+  ) %>%
+  mutate( se=sd/sqrt(n))  %>%
+  mutate( ic=se * qt((1-0.05)/2 + .5, n-1))
+
+
+Tot.Treat.fig <-  ggplot(Totalemerge, aes(x=factor(Treatment, level = level_order), y=mean, fill = Treatment)) + 
+  geom_bar(position=position_dodge(), stat="identity", fill=cols, colour="black") +
+  geom_errorbar( aes(ymin=mean-ic, ymax=mean+ic), width=0.2) +
+  xlab("Treatment") + ylab("total wasps emerged") 
+Tot.Treat.fig <- Tot.Treat.fig + theme_classic() + theme(axis.title=element_text(face="bold.italic", 
+                                                                                   size="12", color="black"), legend.position="top")
+
+#no difference between 5 and 10 in terms of mean number of wasps - 
+# didn't count number of nymphs, possibly not enough? Or something else - saturation point?
+# Max for 1 female is 94, on average 58; max for 10 females is 205, avg is 98
+# max for 5 females is 179, avg is 193 
+
+
+# (4) is the sequence of emergence the same across treatments?
+
+#GAMM for tot - do males and females show different emergence patterns?
+
+Females <- SR.WL[, c('Tube.tub', 'f', 'Tube_ID', 'Treatment', 'Timecont')]
+colnames(Females)<- c('Tube.tub', 'n', 'Tube_ID', 'Treatment', 'Time')
+Females$Sex <- "F"
+
+
+Males <- SR.WL[, c('Tube.tub', 'm', 'Tube_ID', 'Treatment', 'Timecont')]
+colnames(Males)<- c('Tube.tub', 'n', 'Tube_ID', 'Treatment', 'Time')
+Males$Sex <- "M"
+
+Long.SR.WL <- rbind(Females, Males)
+
+library(mgcv)
+
+LMC.emergence <- gamm(n ~ s(Time, fx = FALSE, k=-1, bs = "ds"), random = list(Tube_ID=~1), 
+              , family = poisson(link = "log"), data = Long.SR.WL)
+Long.SR.WL$Sex <- as.factor(Long.SR.WL$Sex)
+
+LMC.sex.emergence <- gamm(n ~ s(Time, fx = FALSE, k=-1, bs = "ds", by = Sex), random = list(Tube_ID=~1), 
+                          , family = poisson(link = "log"), method = "REML", data = Long.SR.WL)
+
+Long.SR.WL$Treatment <- as.factor(Long.SR.WL$Treatment)
+
+LMC.Treat.emergence <- gamm(n ~ s(Time, fx = FALSE, k=-1, bs = "ds", by = Treatment), random = list(Tube_ID=~1), 
+                          , family = poisson(link = "log"), method = "REML", data = Long.SR.WL)
+
+
+gam.check(LMC.emergence$gam)
+gam.check(LMC.sex.emergence$gam)
+gam.check(LMC.Treat.emergence$gam)
+
+anova(LMC.emergence$lme, LMC.sex.emergence$lme, LMC.Treat.emergence$lme)
+#improve when you put sex in and when you put treatment in
+
+summary(LMC.emergence$gam)
+anova(LMC.emergence$gam)
+plot(LMC.emergence$gam,pages=1)
+
+summary(LMC.sex.emergence$gam)
+anova(LMC.sex.emergence$gam)
+plot(LMC.sex.emergence$gam,pages=1)
+
+summary(LMC.Treat.emergence$gam)
+anova(LMC.Treat.emergence$gam)
+plot(LMC.Treat.emergence$gam,pages=1)
+
+#Treatment by sex
+
+#Females
+
+LMC.Females.emergence <- gamm(n ~ s(Time, fx = FALSE, k=-1, bs = "ds"), random = list(Tube_ID=~1), 
+                            family = poisson(link = "log"), method = "REML", data = Females)
+
+Females$Treatment <- as.factor(Treatment)
+
+LMC.Females.Treat.emergence <- gamm(n ~ s(Time, fx = FALSE, k=-1, bs = "ds", by = Treatment), random = list(Tube_ID=~1), 
+                              family = poisson(link = "log"), method = "REML", data = Females)
+
+summary(LMC.Females.emergence$gam)
+anova(LMC.Females.Treat.emergence$gam)
+plot(LMC.Females.emergence$gam,pages=1)
+plot(LMC.Females.Treat.emergence$gam,pages=1)
+
+
+#adding in Treatment reduces AIC 
+
+#Males
+
+Males$Treatment <- as.factor(Treatment)
+
+LMC.Males.emergence <- gamm(n ~ s(Time, fx = FALSE, k=-1, bs = "ds"), random = list(Tube_ID=~1), 
+                              family = poisson(link = "log"), method = "REML", data = Males)
+
+LMC.Males.Treat.emergence <- gamm(n ~ s(Time, fx = FALSE, k=-1, bs = "ds", by = Treatment), random = list(Tube_ID=~1), 
+                                   family = poisson(link = "log"), method = "REML", data = Males)
+
+summary(LMC.Males.emergence$gam)
+anova(LMC.Males.Treat.emergence$gam)
+plot(LMC.Males.emergence$gam,pages=1)
+plot(LMC.Males.Treat.emergence$gam,pages=1)
+
+# what does this actually tell me? Emergence patterns are different but how quantitatively?
+#SSM not necessary as we have all the data (i.e. no hidden structure that needs estimating)
+
+# do males emerge earlier than females?
+  #does this differ over treatments
+
+# recode data
+
+data <- Females
+stretch_females <- 
+  data.frame(data[rep(seq_len(dim(data)[1]), data$n), c(1,3:6), drop = FALSE], row.names=NULL) 
+stretch_females$n <- 1
+
+data <- Males
+stretch_males <- 
+  data.frame(data[rep(seq_len(dim(data)[1]), data$n), c(1,3:6), drop = FALSE], row.names=NULL) 
+stretch_males$n <- 1                            
+
+stretch_data <- rbind(stretch_males, stretch_females)
+
+#use cox model with mixed effects
+
+Time.mod.Treat.Sex.int<- coxme(Surv(Time) ~ Treatment*Sex + (1|Tube_ID), stretch_data)
+Time.mod.Treat.Sex<- coxme(Surv(Time) ~ Treatment +Sex + (1|Tube_ID), stretch_data)
+Time.mod.Treat <- coxme(Surv(Time) ~ Treatment + (1|Tube_ID), stretch_data)
+Time.mod.Sex <- coxme(Surv(Time) ~ Sex + (1|Tube_ID), stretch_data)
+Time.mod.Null<- coxme(Surv(Time) ~ 1+ (1|Tube_ID), stretch_data)
+
+
+anova(Time.mod.Null, Time.mod.Sex, Time.mod.Treat, Time.mod.Treat.Sex, Time.mod.Treat.Sex.int)
+#lowest LL includes treat and sex (interaction doesn't make a difference)
+
+summary(Time.mod.Treat.Sex)
+car::Anova(Time.mod.Treat.Sex)
+
+#No interaction effect but both treatment and sex are related to emergence time
+#5 and 10 sig diff than 1, recode - are they different from each other?
+
+stretch_data$Treatment.recode <- recode(stretch_data$Treatment, "1" = "10", "10" = "1")
+stretch_data$Treatment.recode <- as.character(stretch_data$Treatment.recode)
+
+Time.mod.Treat.Sex.recode <- coxme(Surv(Time) ~ Treatment.recode +
+         Sex + (1|Tube_ID), stretch_data)
+                                    
+summary(Time.mod.Treat.Sex.recode)
+car::Anova(Time.mod.Treat.Sex.recode)
+
+#no sig diff in emergence time of both sexes between 5 and 10
+
+#check with female and male data only
+
+Time.mod.Treat.fem <- coxme(Surv(Time) ~ Treatment + (1|Tube_ID), stretch_females)
+summary(Time.mod.Treat.fem)
+car::Anova(Time.mod.Treat.fem)
+
+stretch_females$Treatment.recode <- recode(stretch_females$Treatment, "1" = "10", "10" = "1")
+stretch_females$Treatment.recode <- as.character(stretch_females$Treatment.recode)
+
+Time.mod.Treat.Fem.recode <- coxme(Surv(Time) ~ Treatment.recode +
+                                     (1|Tube_ID), stretch_females)
+summary(Time.mod.Treat.Fem.recode)
+#for females - emergence date sig for 1 foundress, 5 and 10 the same
+
+Time.mod.Treat.male<- coxme(Surv(Time) ~ Treatment + (1|Tube_ID), stretch_males)
+summary(Time.mod.Treat.male)
+car::Anova(Time.mod.Treat.male)
+
+stretch_males$Treatment.recode <- recode(stretch_males$Treatment, "1" = "10", "10" = "1")
+stretch_males$Treatment.recode <- as.character(stretch_males$Treatment.recode)
+
+Time.mod.Treat.male.recode <- coxme(Surv(Time) ~ Treatment.recode +
+                                     (1|Tube_ID), stretch_males)
+summary(Time.mod.Treat.Fem.recode)
+#for males only 1 and 10 sig differ (1 and 5 and 10 and 5 the same) 
+#average earlier emergence when only 1 foundress
+
+#plot emergence of males and females over time (all treatments)
+
+Sex.emergence.fig <- ggplot(data = Long.SR.WL, aes(x = Time, y = n, colour=Sex)) +
+  geom_smooth(method = "loess", alpha=0.2)
+Sex.emergence.fig <- Sex.emergence.fig + theme_classic() + theme(axis.title=element_text(face="bold.italic", 
+                                                                                         size="12", color="black"), legend.position="top")
+Sex.emergence.fig + labs(colour = "Treatment") + xlab("Emergence time (days)") + ylab("# emerging wasps")
+
+
+#plot emergence of females in different treatments
+
+level_order <- c('1', '5', '10') 
+
+Fem.emergence.fig <- ggplot(data = Females, aes(x = Time, y = n, colour=factor(Treatment, level = level_order))) +
+  geom_smooth(method = "loess", alpha=0.2) + scale_y_continuous(limits = c(0, NA))
+Fem.emergence.fig <- Fem.emergence.fig + theme_classic() + theme(axis.title=element_text(face="bold.italic", 
+                                                                                   size="12", color="black"), legend.position="top")
+Fem.emergence.fig + labs(colour = "Treatment") + xlab("Emergence time (days)") + ylab("# emerging female wasps")
+
+Male.emergence.fig <- ggplot(data = Males, aes(x = Time, y = n, colour=factor(Treatment, level = level_order))) +
+  geom_smooth(method = "loess", alpha=0.2) + scale_y_continuous(limits = c(0, NA))
+Male.emergence.fig <- Male.emergence.fig + theme_classic() + theme(axis.title=element_text(face="bold.italic",
+size="12", color="black"), legend.position="top")
+Male.emergence.fig + labs(colour = "Treatment") + xlab("Emergence time (days)") + ylab("# emerging male wasps")
+
+
+#bar plot of means for all treatments and by sex
+
+Long.emerge.sum <-  stretch_data %>%
+  group_by(Treatment, Sex) %>%
+summarise(
+  n=n(),
+  mean=mean(Time),
+  sd=sd(Time),
+  max=max(Time),
+  min=min(Time),
+) %>%
+  mutate( se=sd/sqrt(n)) %>%
+  mutate(  ic=se * qt((1-0.05)/2 + .5, n-1))
+  
+level_order <- c('1', '5', '10') 
+Full.emergence.fig <- ggplot(data = Long.emerge.sum,
+       aes(x = Sex, y = mean, fill = factor(Treatment, level = level_order))) +
+  geom_bar(stat="identity", color="black", 
+           position=position_dodge()) +
+  geom_errorbar(aes(ymin=mean-ic, ymax=mean+ic), width=.2,
+                position=position_dodge(.9)) 
+Full.emergence.fig <- Full.emergence.fig + coord_cartesian(ylim=c(12,13.5))
+Full.emergence.fig <- Full.emergence.fig + theme_classic() + theme(axis.title=element_text(face="bold.italic", 
+                                                                                       size="12", color="black"), legend.position="top")
+Full.emergence.fig  + ylab("Emergence time (days)") + xlab("Sex") + labs(fill= "Treatment") + scale_colour_manual(values = cols)
+
+#Earlier average emergence for females and males when only 1 foundress
+
+#test using glm
+
+# WING LENGTH
+
+
+
+Males <- SR.WL[, c('Tube.tub', 'Tube_ID','Treatment', 'Time', 'M.Winglength')]
+colnames(Males)<- c('Tube.tub', 'Tube_ID', 'Treatment', 'Time', 'Winglength')
+
+Females <- SR.WL[, c('Tube.tub', 'Tube_ID', 'Treatment', 'Time', 'F.Winglength')]
+colnames(Females)<- c('Tube.tub', 'Tube_ID', 'Treatment', 'Time', 'Winglength')
+
+
+Males$sex <- 1
+Females$sex <- 0
+
+library(data.table)
+
+M.F.WL <- bind_rows(Males,Females)
+M.F.WL$Timecont<- as.numeric(M.F.WL$Time)
+
+M.F.WL.clean <-
+M.F.WL %>% drop_na(Winglength)
+
+
+Wing.length.mod <- lmer(Winglength ~ sex*Treatment + Treatment*Timecont
+                        + Timecont*sex + Treatment*Timecont*sex +
+                          (1|Tube_ID), data = M.F.WL.clean)
+
+SimulationOutputsr <- simulateResiduals(Wing.length.mod, plot = T)
+
+summary(Wing.length.mod)
+car::Anova(Wing.length.mod)
+
+M.F.WL.clean$Sex <- recode(M.F.WL.clean$sex, 
+                           "0" = "F", "1" = "M")
+
+WL.sum <-  M.F.WL.clean %>%
+  group_by(Treatment, Sex) %>%
+  summarise(
+    n=n(),
+    mean=mean(Winglength),
+    sd=sd(Winglength),
+    max=max(Winglength),
+    min=min(Winglength),
+  ) %>%
+  mutate( se=sd/sqrt(n)) %>%
+  mutate(  ic=se * qt((1-0.05)/2 + .5, n-1))
+
+
+#(1) Is there a size difference between males and females?
+
+#yes - males bigger
+
 
 # (2) Is there an overall difference in size of wasps that emerge from high, medium 
 #or low LMC treatments?
 
+#no 
+
+
 # (3) Is there an interaction between treatment and wasp sex?
+
+#no
+
+#plotting treatment and sex
+
+level_order <- c('1', '5', '10') 
+Full.WL.fig <- ggplot(data = WL.sum,
+                             aes(x = Sex, y = mean, fill = factor(Treatment, level = level_order))) +
+  geom_bar(stat="identity", color="black", 
+           position=position_dodge()) +
+  geom_errorbar(aes(ymin=mean-ic, ymax=mean+ic), width=.2,
+                position=position_dodge(.9)) 
+Full.WL.fig <- Full.WL.fig + coord_cartesian(ylim=c(1500,1700))
+Full.WL.fig <- Full.WL.fig + theme_classic() + theme(axis.title=element_text(face="bold.italic", 
+                                                                                           size="12", color="black"), legend.position="top")
+Full.WL.fig  + ylab("Winglength (µM)") + xlab("Sex") + labs(fill= "Treatment") + scale_colour_manual(values = cols)
+
 
 # (4) Is wasp size correlated with emergence time?
 
-# include random effect of tube ID 
+#yes - smaller over time - males and females
+
+Time.WL.fig <- ggplot(data = M.F.WL.clean, aes(x = Timecont,  y = Winglength, colour=Sex)) +
+  geom_smooth(method = "loess", alpha=0.2)
+Time.WL.fig <- Time.WL.fig + theme_classic() + theme(axis.title=element_text(face="bold.italic", 
+                                                                                        size="12", color="black"), legend.position="top")
+Time.WL.fig + labs(colour = "Sex") + xlab("Emergence time (days)") + ylab("Winglength (µM)")
+
+### Summary of results
+
+#Emergence sex ratio
+ # Becomes more female biased over time. No effect of number of foundresses.
+
+#Cumulative sex ratio 
+   # same pattern as emergence sex ratio. 
+
+#No effect of the total number of wasps that emerged or the number of foundresses 
+#on the sex ratio
+
+#more wasps in total emerge when 5 or 10 foundresses compared to 1, but no diff between 5 and 10
+  #suggests saturation point reached
+
+# For emergence time - GAMMs suggest adding sex and treatment to emergence time data both improve 
+   #model fit 
+#can't get sex and treatment in the model - but separate univariate models show differences 
+#emergence patterns for males and females - females increase in numbers more rapidly
+#at the start compared to males but no obvious qualitative patterns 
+  #males also no obvius patterns
+]
+#also used a Cox model with random effects (coxme) to test emergence sequence - 
+#best model included treatment and sex b
+
+#plotted figure of average females across all groups - males emerged eariler, 
+#individuals in treatment 1 emerged earlier than 5 and 10, no diff between 5 and 10
+#males emerged earlier than females
+
+
+#winglength - individuals that emerged earlier are larger than later emergers. 
+#Males are larger than females but no effect of treatment on wing length
+
+
 
