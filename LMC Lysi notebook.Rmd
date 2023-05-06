@@ -1,0 +1,298 @@
+---
+title: "Local mate competition in a quasigregarious parasitoid wasp"
+output: html_notebook
+---
+
+This is a notebook where I can keep track of ideas and things about LMC in Lysiphlebus.
+
+Experiment 1: sex allocation under different foundress numbers in the lab
+
+Methods
+
+Summary:
+In this series of experiments we measured the sex ratios produced by sexual Lysiphlebus fabarum females when they oviposited under different LMC conditions (high, 1 foundress; moderate, 5 foundresses; low, 10 foundresses). If females allocate sex facultatively depending on the number of co-foundresses we predict sex ratios will be more male biased as the number of foundresses increases. We also tested whether foundresses produce male and female offspring of different sizes depending on the degree of mate competition they are likely to face. We predicted that male offspring from low LMC treatments (5 and 10 co-foundresses) and replicates with male biased sex ratios would be larger than males produced by a single foundress. Additionally, if large body size in beneficial in intrasexual competition males emerging later are expected to be larger across all treatments. We also tested whether male or female body size was related to the brood size or the sex ratio, and whether sexual dimorphism (male winglength - female winglength) varied over time or treatment. 
+
+Experimental design:
+Two weeks prior to the start of the experiment we place 40 sexual Lysiphlebus fabarum females in cages containing a broad bean plant infested with a colony of the black bean aphid Aphis fabae. After 14 days we isolated newly emerged female wasps from these cages. We put female wasps on a broad bean seedling in a small pot covered with an organza bag then added a colony of ~200 A. fabae nymphs to the plant for the wasp/s to parasitise. In order to manipulate the degree of LMC, females were either added alone (1 foundress treatment), or with 4 (5 foundress treatment) or 9 (10 foundress treatment) other females. Replicates of each treatment were set up over 3 days, one block in the morning and one block in the afternoon. The start time (when aphids and wasps were combined) was recorded for each replicate to calculate emergence time post-exposure. Eight days later aphid mummies were removed from the plants and placed in small insect rearing dishes. The plants were cut at the stem and kept in plastic pots and monitored for further mummy development. Dishes and cut plants were checked for wasps emergence from day 10 twice per day (am and pm). All emerged wasps were collected into eppendorf tubes, which were labelled with the replicate ID and date/time. These were placed in the freezer and once the wasps had died the males and females in each tube were counted using a dissecting microscope (wasps were sexed based on the external genital morphology). We also measured the wing length (µM) of one male and one female from each tube to get body size estimates. We did this by removing one forewing (and recording which side) under a dissecting microscope, then taking a photograph of it under the microscope after taking a photograph of an ocular micrometer for scale. Winglength was measured at the longest point on the forewing using ImageJ (REF). To do this we measured the length of the 1mm graticule in pixels and then set a scale to convert pixels to µM. After the scale was set we measured the wings and extracted the values from ImageJ which were given in µM. We measured a subset of photos twice in order to estimate repeatability using the intraclass correlation coefficient (ICC).
+
+Statistical analyses:
+We used linear and generalized linear mixed models in the R package lme4 (Bates et al 2015) for analyses which required a random effect of replicate to be included. This included any tests for effects of emergence time where (i.e. on sex ratio, wing length) the unit of replication was tube and multiple tubes were collected at different time points. When the dependent variable was pooled across all replicates for each time point we used linear and general linear models (with no random effect structure) also using lme4. To test effects of independent variables on the sex ratio we used GLMs/GLMMs with a binomial error structure and a logit link function. To test for effects of independent variables on winglength we used LMs/LMMs with a Gaussian error structure. We used the DHARMa package in R (Hartig 2022) to test that models were appropriately. For emergence time we ran linear models to test overall effect of treatment on emergence time on males and females (and tested for an interaction effect). In addition we used mixed effects Cox models using the package coxme (Therneau 2022) to test how emergence varied over time across treatments for all offspring and for males and females separately. In the results sections below we outline the full parameterization for each model along with any caveats.  
+
+
+Results:
+
+Sex ratio:
+Does the sex ratio differ according to the number of foundresses which oviposited together? 
+
+A generalized linear mixed model with a binomial error function and a logit link function was used to test whether treatment and emergence time (and their interaction effect) were associated with the sex ratio. There was no effect of treatment (number of foundresses) on the sex ratio of emerging wasps, nor was there any interaction between treatment and emergence time. Across treatments the sex ratio was consistently around 
+```{r}
+mean(total$binomial_CI$mean) 
+```
+±
+```{r}
+mean(total$binomial_CI$mean - total$binomial_CI$lower)
+```
+
+Only the main effect of emergence time was associated with the sex ratio; as is common in many parasitoids males emerged earlier than females (protandry) and so the sex ratio was more male biased at the start of the emergence period. 
+
+```{r}
+summary(SexRatioMod)
+car::Anova(SexRatioMod)
+Time.Treat.SR 
+```
+These results were the same whether we used the emergence sex ratio (males collected in tube^i at t^j/males + females collected in tube^i at time^j) or the cumulative sex ratio (total males collected in tube^i/ total males + females collected in tube^i).
+
+The cumulative sex ratio was on average 
+```{r}
+mean(cumtotal$binomial_CI$mean)
+```
+±
+```{r}
+mean(cumtotal$binomial_CI$mean - cumtotal$binomial_CI$lower)
+```
+
+```{r}
+summary(CumSexRatioMod)
+car::Anova(CumSexRatioMod)
+
+Time.Treat.cumSR 
+```
+
+Next we used a general linear model with a binomial error structure and a logit link function to test whether there was an association between the total number of wasps that emerged and the overall sex ratio. We also tested whether any relationship consistent across treatments by including an interaction effect of treatment and total number of wasps emerging. We found no evidence for an association between the sex ratio and the number of wasps and no interaction with treatment. 
+
+```{r}
+summary(SumSexRatioMod)
+car::Anova(SumSexRatioMod)
+
+Tot.Treat.SR 
+```
+
+When we considered the total number of wasps that emerged as the dependent variable in a linear model however, we found there was an effect of treatment. Fewer wasps emerged when there was only 1 foundress 
+
+```{r}
+Totalemerge$mean[[1]]
+```
+±
+```{r}
+Totalemerge$ic[[1]]
+```
+
+than when there were 5 
+```{r}
+Totalemerge$mean[[3]]
+```
+±
+```{r}
+Totalemerge$ic[[3]]
+```
+
+or 10
+```{r}
+Totalemerge$mean[[2]]
+```
+
+
+```{r}
+Totalemerge$ic[[2]]
+```
+
+
+```{r}
+summary(TotMod)
+car::Anova(TotMod)
+
+Tot.Treat.fig 
+```
+Total wasps emerging in treatments 5 and 10 did not differ significantly 
+
+```{r}
+summary(ReTotMod)
+car::Anova(ReTotMod)
+```
+
+suggesting that a saturation point had been reached where there were insufficient aphid nymphs for all females to lay their full complement of eggs. 
+
+Timing of emergence:
+Wasps started to emerge 10.5 days after foundresses were exposed to aphids and continued to emerge until day 16. Cox mixed effect models were used to test whether emergence time was influenced by wasp sex or treatment. The best fitting model included both sex and treatment but not their interaction effect; there were significant main effects of both wasp sex and treatment. 
+
+```{r}
+anova(Time.mod.Null, Time.mod.Sex, Time.mod.Treat, Time.mod.Treat.Sex, Time.mod.Treat.Sex.int)
+
+summary(Time.mod.Treat.Sex)
+car::Anova(Time.mod.Treat.Sex)
+```
+
+There were significant difference in the timing of emergence between treatments with a single foundress with both 5 and 10 foundress treatments, but the pattern of emergence was consistent across the 5 and 10 foundress treatments.
+
+```{r}
+summary(Time.mod.Treat.Sex.recode)
+car::Anova(Time.mod.Treat.Sex.recode)
+```
+Emergence date was earlier on average for males 
+
+```{r}
+male.emerge.mean
+```
+±
+```{r}
+male.emerge.ic
+```
+
+than females
+
+```{r}
+female.emerge.mean
+```
+±
+```{r}
+female.emerge.ic
+```
+
+
+and earlier when there was only a single foundress 
+
+```{r}
+oneemerge.mean
+```
+±
+```{r}
+oneemerge.ic
+```
+
+than when there were 5
+
+```{r}
+fiveemerge.mean 
+```
+±
+```{r}
+fiveemerge.ic
+```
+
+or 10 foundresses
+
+```{r}
+tenemerge.mean
+```
+
+
+```{r}
+tenemerge.ic
+```
+
+
+```{r}
+Full.emergence.fig 
+```
+
+Wing length:
+
+To test for differences in wing length according to sex, treatment and time we used a linear mixed model including a random effect of tube ID. Main effects and all two-way interaction effects as well as the three-way interaction effect between sex, treatment and time were included. The only significant effects were sex and time: males were larger than females and larger individuals tended to emerge earlier. There were no significant interaction effects.
+
+```{r}
+summary(Wing.length.mod)
+car::Anova(Wing.length.mod)
+
+Full.WL.fig  + ylab("Winglength (µM)") + xlab("Sex") + labs(fill= "Treatment") + scale_colour_manual(values = cols)
+
+Time.WL.fig + labs(colour = "Sex") + xlab("Emergence time (days)") + ylab("Winglength (µM)")
+
+```
+To look for evidence of facultative sex allocation according to host size and 
+
+
+After finding that there was sexual dimorphism in wing length, we tested whether this varied according to treatment or time. To do this we took the mean male winglength at each time point and subtracted female winglength, we then used a linear model with time (as a covariate) and treatment as predictors, and their interaction effect. There was no change in sexual size dimorphism over time and sexual size dimorphism was consistent across treatments. 
+
+```{r}
+summary(SD.WL.mod)
+car::Anova(SD.WL.mod)
+
+Time.WL.SD.fig + labs(colour = "Treatment") + xlab("Emergence time (days)") + ylab("Sexual dimorphism in Winglength (µM)")
+
+```
+
+We also looked at whether male or female wing length was associated with the number of males or females that emerged in the same replicate. A correlation between body size and density or sex ratio could indicate a sex allocation strategy where mothers anticipate the degree of competition and sexual conflict their offspring might face, and allocate male or female eggs to larger or smaller aphids accordingly. Larger individuals might do better for instance under biased sex ratios and high densities. We tested this on the mean wing lengths for males and females per replicate tube,  as the sample size was lower for this analysis (57 replicates) we were unable to use model containing all possible predictors and so we used a model comparison approach. We ran models including either the sex ratio, total number of wasps, total number of male wasps and total number of female wasps, and compared these to the null model using the AIC. We ran these models for male and female wing size separately. We also ran the same set of models using sexual dimorphism in wing length (male wing length in µM - female wing length in µM).
+
+In all cases the null model was the best fitting model
+
+```{r}
+AIC(M.SR.WL.null, M.SR.WL.SR, M.SR.WL.tot, M.SR.WL.m, M.SR.WL.f)
+AIC(F.SR.WL.null, F.SR.WL.SR, F.SR.WL.tot, F.SR.WL.m, F.SR.WL.f)
+AIC(SD.SR.WL.null, SD.SR.WL.SR, SD.SR.WL.tot, SD.SR.WL.m, SD.SR.WL.f)
+```
+
+Ideally we would test this more explictly in future, using individuals as replicates, perhaps using some sort of bootstrapping, but so far it doesn't look likely there is any facultative sex allocation based on possible competition going on. 
+
+Thoughts about results:
+Asymmetric LMC - predicts that when females lay eggs on a patch asynchronously 
+and males do not disperse, which leads to weaker LMC for later emerging males
+
+Shuker et al (2005) showed early male advantage in Nasonia - males from an 
+earlier emerging brood (24 hours earlier) sired more offspring of females that emerged later
+Basically - there's not much point laying males if there are already males out
+All the other females are gone so males aren't valuable
+So if there's asynchronous emergence invest more in females
+  But Lysiphlebus aren't doing that at all - they are alwayas producing 40% males
+  
+Partial LMC - West & Herre 1998 - when some mating occurs off the natal patch LMC = partial
+If males are winged they can go elsewhere to find mating opportunities - i.e. nearby patches
+
+LMC is probably partial in Lysiphlebus - the fact that males are larger than females suggests that 
+there is selection on them to disperse, survive and mate 
+
+Do large males do better in scramble competition or doesn't it matter?
+
+Males (and females) get smaller over time - could be an artefact of the big hosts being taken
+early - protandry - they lay mainly males in the oldest (biggest) hosts on a patch?
+
+The question is - do early emerging males (and females) benefit from being large, or is it just 
+a side effect of females laying male eggs first and laying on large hosts first?
+
+WHAT IS THE STORY?
+- Quasigregarious parasitoids overlooked wrt LMC 
+- Many important biocontrol agents quasigreg - where we want to have lots of females
+- Useful for theory about multiple mating - if quasigreg parasitoids show similar 
+levels of polyandry to gregarious species supports Godfray hypothesis, goes against Ridley
+- If they act more like solitary females in their mating rates suggests polyandry not to 
+do with sperm requirements
+
+- BUT this will also depend on how much sperm they actually use - are they laying v female biased
+sex ratios under LMC? If so, sperm depletion could be an issue. If sex ratio is more equal, maybe not, 
+just don't need to be polyandrous.
+
+- Include data on quasigregarious parasitoids from database - what are estimates of sex ratio?
+  - database - QG parasitoids very variable SR - where they mate (on or off patch) and how
+  big patches are probs important
+  
+- Look at sex ratios in field collected Lysiphlebus fabarum sexuals 
+- Across the season - prob scope for high LMC early on, but is selection consistent enough?
+- and if there aren't a lot of wasps around, maybe making extra males is no bad thing
+
+- Ok, so why don't they do it:
+(1) males are large and winged, they can disperse and mate elsewhere - LMC is partial - 
+may be there is enough off patch mating to remove selection on facultative sex allocation 
+
+- Next steps - aphid size - do they mean to make big males? If so, suggests fitness payoff from big boys
+- Field sex ratios and foundress numbers - is there any evidence that ability to allocate sex facultatively has been lost during mass rearing?
+
+NEXT THING - LOSS OF FACULTATIVE SEX ALLOCATION IN MASS REARED PARASITOIDS FOR BIOCONTROL 
+COMPARED TO WILD COLLECTED
+
+ 
+
+From West & Herre 1998 - 'in many species where females oviposit sequentially at a patch, an individual female may be unable to determine precisely the foundress number. In this case females may judge foundress number at least partially by their average contact with other females over time (e.g. Strand, 1988), and so the circumstances in which a female is kept prior to an experiment will effect the sex ratio that she produces in that experiment.'
+
+Strand 1988 showed that in Telenomus heliothidis (egg parasitoid of noctuidae, some eggs laid singly, some in patches) females don't allocate sex according to superparasitism or foundress number, but their previous encounters with other females (i.e. female density) - this could be a lab adaptation though - rarely that many females in nature
+
+We took Lysiphlebus females from stock - maybe they all do the same thing because they had similar experiences
+
+If they are doing this - and it's experience before that matters - do they treat
+asexual females as sexuals? 
+
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file). 
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+
